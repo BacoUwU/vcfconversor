@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesclador de Contatos para vCard (.vcf)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 25px 30px;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 750px;
+            box-sizing: border-box;
+        }
+        h1 {
+            color: #1a73e8;
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 1.8em;
+        }
+        .file-upload-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #5f6368;
+        }
+        input[type="file"] {
+            display: block;
+            margin-bottom: 10px;
+            padding: 12px;
+            border: 1px solid #dadce0;
+            border-radius: 8px;
+            width: calc(100% - 26px);
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+        }
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        button {
+            background-color: #1a73e8;
+            color: white;
+            padding: 14px 22px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #processAndPreviewButton {
+             margin-top: 10px;
+        }
+        button:hover {
+            background-color: #1669c9;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        button:disabled {
+            background-color: #e0e0e0;
+            cursor: not-allowed;
+        }
+        #status, #previewArea {
+            margin-top: 25px;
+            padding: 12px 15px;
+            border-radius: 8px;
+            text-align: left;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+        .success { background-color: #e6f4ea; color: #1e8e3e; border: 1px solid #a8d8b9; }
+        .error { background-color: #fce8e6; color: #d93025; border: 1px solid #f7c5c0; }
+        .info { background-color: #e8f0fe; color: #1967d2; border: 1px solid #c2d7fb; }
+        
+        #previewArea {
+            background-color: #f8f9fa;
+            border: 1px solid #dadce0;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        #previewArea h3 {
+            margin-top: 0; color: #1a73e8; border-bottom: 1px solid #dadce0; padding-bottom: 8px;
+        }
+        .preview-contact {
+            border-bottom: 1px dashed #e0e0e0; padding-bottom: 10px; margin-bottom: 10px;
+        }
+        .preview-contact:last-child {
+            border-bottom: none; margin-bottom: 0;
+        }
+        .preview-contact p {
+            margin: 5px 0; font-size: 0.9em;
+            word-wrap: break-word;
+        }
+        .preview-contact strong {
+            color: #333;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Mesclador de Contatos para vCard (.vcf)</h1>
+        
+        <div class="file-upload-section">
+            <label for="newContactsFile">1. Carregue a planilha com NOVOS contatos:</label>
+            <input type="file" id="newContactsFile" accept=".xlsx, .xls, .ods">
+            <small>Formato: Coluna 1 (Contrato), Coluna 2 (CPF/CNPJ), Coluna 3 (Nome), Coluna 4 (Telefone).</small>
+        </div>
+
+        <div class="file-upload-section">
+            <label for="existingContactsFile">2. Carregue o arquivo com seus contatos EXISTENTES (Opcional):</label>
+            <input type="file" id="existingContactsFile" accept=".vcf, .csv, text/vcard, text/csv">
+            <small>Use um arquivo .vcf ou .csv para evitar duplicados. Listas grandes serão divididas em um ficheiro .zip.</small>
+        </div>
+
+        <button id="processAndPreviewButton">🔍 Processar, Mesclar e Ver Prévia</button>
+        <div class="button-group" id="downloadButtons" style="display:none;">
+            <button id="downloadSingleButton" disabled>💾 Baixar Ficheiro Único (Mesclado)</button>
+            <button id="downloadZipButton" disabled>ZIP Baixar por Grupos (Recomendado)</button>
+        </div>
+
+        <div id="status"></div>
+        <div id="previewArea" style="display:none;"></div>
+    </div>
+
+    <script>
+        const newContactsFileInput = document.getElementById('newContactsFile');
+        const existingContactsFileInput = document.getElementById('existingContactsFile');
+        const processAndPreviewButton = document.getElementById('processAndPreviewButton');
+        const downloadButtonsDiv = document.getElementById('downloadButtons');
+        const downloadSingleButton = document.getElementById('downloadSingleButton');
+        const downloadZipButton = document.getElementById('downloadZipButton');
+        const statusDiv = document.getElementById('status');
+        const previewAreaDiv = document.getElementById('previewArea');
+
+        let VCF_DATA = {};
+        const CHUNK_SIZE = 1000;
+
+        // --- Funções Auxiliares ---
+        function toTitleCase(str) {
+            if (!str) return "";
+            const smallWords = /^(da|de|do|dos|das)$/i;
+            return str.toLowerCase().split(' ').map((word, index) => {
+                if (index > 0 && smallWords.test(word)) {
+                    return word;
+                }
+                return word.charAt(0).toUpperCase() + word.slice(1);
+            }).join(' ');
+        }
+        
+        function escapeVCardField(field) {
+            if (field === null || field === undefined) return "";
+            return String(field).replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\n/g, '\r\n');
+        }
+
+        function formatarTelefoneParaVCard(telefoneOriginal) {
+             let telOriginalTrim = String(telefoneOriginal || "").trim();
+            if (!telOriginalTrim) return "";
+            
+            const todosDigitos = telOriginalTrim.replace(/\D/g, "");
+            
+            if (telOriginalTrim.startsWith("+") && !telOriginalTrim.startsWith("+55")) {
+                return `+${todosDigitos}`;
+            }
+            
+            let ddd = "", numeroLocal = "", prefixoSaida = ""; 
+
+            if (todosDigitos.startsWith("55") && todosDigitos.length >= 12) {
+                ddd = todosDigitos.substring(2, 4);
+                numeroLocal = todosDigitos.substring(4);
+            } else if (todosDigitos.length >= 10) {
+                ddd = todosDigitos.substring(0, 2);
+                numeroLocal = todosDigitos.substring(2);
+            } else {
+                return todosDigitos;
+            }
+
+            prefixoSaida = (ddd === "66") ? "+55" : "021";
+            if (numeroLocal.length === 8) numeroLocal = "9" + numeroLocal;
+
+            if (numeroLocal.length === 9) {
+                return `${prefixoSaida} ${ddd} ${numeroLocal.substring(0,1)} ${numeroLocal.substring(1,5)}-${numeroLocal.substring(5)}`;
+            }
+            
+            return todosDigitos;
+        }
+
+        function displayPreview(newContacts, totalCount) {
+            const newCount = newContacts.length;
+            previewAreaDiv.innerHTML = `<h3>Prévia dos Novos Contatos a Adicionar (${newCount} de um total de ${totalCount}):</h3>`;
+            if (newCount === 0) {
+                previewAreaDiv.innerHTML += '<p>Nenhum contato novo para adicionar.</p>';
+            } else {
+                 const maxPreview = 5;
+                 const toPreview = newContacts.slice(0, maxPreview);
+                 toPreview.forEach(contact => {
+                    const contactDiv = document.createElement('div');
+                    contactDiv.className = 'preview-contact';
+                    contactDiv.innerHTML = `
+                        <p><strong>Nome (FN):</strong> ${escapeHTML(contact.fn)}</p>
+                        <p><strong>Grupo:</strong> ${escapeHTML(contact.grupo) || 'Nenhum'}</p>
+                        <p><strong>Telefone:</strong> ${escapeHTML(contact.tel)}</p>
+                        <p><strong>Nota:</strong> ${escapeHTML(contact.nota)}</p>
+                    `;
+                    previewAreaDiv.appendChild(contactDiv);
+                });
+            }
+            previewAreaDiv.style.display = 'block';
+        }
+
+        function escapeHTML(str) {
+            if (str === null || str === undefined) return "";
+            return String(str).replace(/[&<>"']/g, match => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[match]);
+        }
+        
+        function readFileAsText(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsText(file, 'UTF-8');
+            });
+        }
+        
+        function readFileAsArrayBuffer(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = () => reject(reader.error);
+                reader.readAsArrayBuffer(file);
+            });
+        }
+        
+        function getContractNumbersFromVcf(vcfContent) {
+            const contractNumbers = new Set();
+            const regex = /\[(\d{3,})\]|NOTE(?:;.*)?:.*Contrato:.*?(\d{3,})/gi;
+            let match;
+            while ((match = regex.exec(vcfContent)) !== null) {
+                const contractNumber = match[1] || match[2];
+                if (contractNumber) contractNumbers.add(contractNumber.trim());
+            }
+            return contractNumbers;
+        }
+
+        function getContractNumbersFromCsv(csvContent) {
+            const contractNumbers = new Set();
+            const rows = csvContent.split('\n');
+            if (rows.length < 1) return contractNumbers;
+            const header = rows[0].split(',').map(h => h.trim().replace(/"/g, ''));
+            const nameIndex = header.findIndex(h => h === 'Name');
+            const notesIndex = header.findIndex(h => h === 'Notes');
+
+            if (nameIndex === -1 && notesIndex === -1) return contractNumbers;
+
+            for (let i = 1; i < rows.length; i++) {
+                const cols = rows[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                if(cols.length <= Math.max(nameIndex, notesIndex)) continue;
+                let contractNumber = null;
+                
+                if (nameIndex > -1 && cols[nameIndex]) {
+                    const match = cols[nameIndex].trim().replace(/"/g, '').match(/\[(\d{3,})\]/);
+                    if (match) contractNumber = match[1];
+                }
+                if (!contractNumber && notesIndex > -1 && cols[notesIndex]) {
+                    const match = cols[notesIndex].trim().replace(/"/g, '').match(/Contrato:.*?(\d{3,})/i);
+                     if (match) contractNumber = match[1];
+                }
+                if (contractNumber) contractNumbers.add(contractNumber.trim());
+            }
+            return contractNumbers;
+        }
+
+        async function processAndMergeFiles() {
+            statusDiv.textContent = ''; statusDiv.className = '';
+            previewAreaDiv.style.display = 'none';
+            downloadButtonsDiv.style.display = 'none';
+            downloadSingleButton.disabled = true;
+            downloadZipButton.disabled = true;
+            VCF_DATA = {};
+
+            const newContactsFile = newContactsFileInput.files[0];
+            const existingContactsFile = existingContactsFileInput.files[0];
+
+            if (!newContactsFile) {
+                statusDiv.textContent = '⚠️ Por favor, carregue a planilha de novos contatos.';
+                statusDiv.className = 'info';
+                return;
+            }
+
+            try {
+                statusDiv.textContent = '⏳ Lendo arquivos...'; statusDiv.className = 'info';
+
+                let existingContent = "";
+                let existingContractNumbers = new Set();
+
+                if (existingContactsFile) {
+                    let rawContent = await readFileAsText(existingContactsFile);
+                    existingContent = rawContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+                    
+                    if (existingContactsFile.name.toLowerCase().endsWith('.vcf')) {
+                        existingContractNumbers = getContractNumbersFromVcf(existingContent);
+                    } else if (existingContactsFile.name.toLowerCase().endsWith('.csv')) {
+                        statusDiv.textContent = 'Atenção: A mesclagem com CSV apenas verifica duplicados. Para preservar os contactos existentes, por favor carregue um ficheiro .vcf.';
+                        statusDiv.className = 'info';
+                        existingContractNumbers = getContractNumbersFromCsv(existingContent);
+                        existingContent = ""; // Não preservar conteúdo CSV
+                    }
+                }
+                
+                statusDiv.textContent = `⏳ ${existingContractNumbers.size} contatos existentes encontrados. Processando novos...`;
+
+                const arrayBuffer = await readFileAsArrayBuffer(newContactsFile);
+                const workbook = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const sheetData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+
+                let newVCardsByGroup = {};
+                let previewContactsData = [];
+                
+                const linhaInicial = sheetData.length > 0 && /contrato|cpf|nome|telefone/i.test(sheetData[0].join(' ')) ? 1 : 0;
+
+                for (let i = linhaInicial; i < sheetData.length; i++) {
+                    const row = sheetData[i];
+                    if (!row || row.length < 4 || !String(row[2] || "").trim()) continue;
+
+                    const numContratoOriginal = String(row[0] || "").trim();
+                    if (existingContractNumbers.has(numContratoOriginal)) continue; 
+
+                    const cpfCnpj = String(row[1] || "").trim();
+                    const nomeCompletoOriginal = String(row[2] || "").trim();
+                    const telefoneOriginal = String(row[3] || "");
+                    
+                    const telefoneParaVCard = formatarTelefoneParaVCard(telefoneOriginal);
+                    const nomeCompletoTitleCase = toTitleCase(nomeCompletoOriginal);
+                    const partesNome = nomeCompletoTitleCase.split(' ');
+                    
+                    let nomeBaseParaFN = "";
+                    if(partesNome.length > 0) {
+                        nomeBaseParaFN = partesNome[0]; // Sempre pega o primeiro nome
+                        let lastSignificantNameIndex = 0;
+                        if (partesNome.length > 1) {
+                            // Encontra o índice do primeiro sobrenome significativo
+                            for (let j = 1; j < partesNome.length; j++) {
+                                if (partesNome[j].length >= 3) {
+                                    lastSignificantNameIndex = j;
+                                    break;
+                                }
+                            }
+                            if (lastSignificantNameIndex > 0) {
+                                nomeBaseParaFN = partesNome.slice(0, lastSignificantNameIndex + 1).join(' ');
+                            } else {
+                                // Se nenhum sobrenome significativo for encontrado, pega apenas o primeiro e o segundo
+                                nomeBaseParaFN = partesNome.slice(0, 2).join(' ');
+                            }
+                        }
+                    } else {
+                        nomeBaseParaFN = "Contato";
+                    }
+
+                    const fnVCard = `${nomeBaseParaFN} [${numContratoOriginal}]`;
+                    const nVCard = `;${escapeVCardField(fnVCard)};;;`;
+                    const notaConteudo = `${nomeCompletoTitleCase} - Contrato: ${numContratoOriginal} - CPF/CNPJ: ${cpfCnpj}`;
+                    
+                    let category = "Outros";
+                    const digitosCpfCnpj = cpfCnpj.replace(/\D/g, '');
+
+                    if (nomeCompletoOriginal.toUpperCase().startsWith('(OMNI')) {
+                        category = "TRABALHO";
+                    } else if (numContratoOriginal.startsWith('100021')) {
+                        category = "Empresas";
+                    } else if (numContratoOriginal.startsWith('100340')) {
+                        category = "Cuiaba";
+                    } else if (numContratoOriginal.startsWith('102700') || numContratoOriginal.startsWith('103193')) {
+                        category = "Canal Direto";
+                    } else {
+                        if (digitosCpfCnpj.length === 11) category = "PF";
+                        else if (digitosCpfCnpj.length === 14) category = "PJ";
+                    }
+
+                    const cardLines = [
+                        'BEGIN:VCARD',
+                        'VERSION:2.1',
+                        'PRODID:-//Gemini VCard Generator v8//PT',
+                        `FN:${fnVCard}`,
+                        `N:${nVCard}`,
+                        `TEL;TYPE=CELL:${telefoneParaVCard}`,
+                        `NOTE:${escapeVCardField(notaConteudo)}`,
+                        `CATEGORIES:${category}`,
+                        'END:VCARD'
+                    ];
+                    
+                    if (!newVCardsByGroup[category]) {
+                        newVCardsByGroup[category] = [];
+                    }
+                    newVCardsByGroup[category].push(cardLines.join('\r\n'));
+                    previewContactsData.push({ fn: fnVCard, tel: telefoneParaVCard, nota: notaConteudo, grupo: category });
+                }
+                
+                VCF_DATA = { existingContent, newVCardsByGroup };
+
+                const newContactsAdded = previewContactsData.length;
+                const totalContacts = existingContractNumbers.size + newContactsAdded;
+                
+                statusDiv.className = 'success';
+                statusDiv.textContent = `✅ Processamento concluído. ${existingContractNumbers.size} existentes mantidos. ${newContactsAdded} novo(s) adicionado(s). Total: ${totalContacts}.`;
+                
+                displayPreview(previewContactsData); 
+                
+                if (totalContacts > 0) {
+                    downloadButtonsDiv.style.display = 'flex';
+                    downloadSingleButton.disabled = false;
+                    downloadZipButton.disabled = false;
+                }
+
+            } catch (error) {
+                console.error("Erro detalhado no processamento:", error);
+                statusDiv.textContent = `❌ Erro ao processar arquivos: ${error.message}. Veja o console (F12).`;
+                statusDiv.className = 'error';
+            }
+        }
+
+        processAndPreviewButton.addEventListener('click', processAndMergeFiles);
+        
+        downloadSingleButton.addEventListener('click', () => {
+            const { existingContent, newVCardsByGroup } = VCF_DATA;
+            if (!existingContent && Object.keys(newVCardsByGroup).length === 0) return;
+
+            let allNewCards = [];
+            for (const group in newVCardsByGroup) {
+                allNewCards.push(...newVCardsByGroup[group]);
+            }
+
+            const separator = existingContent.trim() && allNewCards.length > 0 ? '\r\n' : '';
+            const fullVcfContent = existingContent.trim() + separator + allNewCards.join('\r\n');
+
+            const blob = new Blob(["\uFEFF" + fullVcfContent], { type: 'text/vcard;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", "contatos_mesclados_unico.vcf");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        });
+
+        downloadZipButton.addEventListener('click', () => {
+            const { existingContent, newVCardsByGroup } = VCF_DATA;
+             if (!existingContent && Object.keys(newVCardsByGroup).length === 0) return;
+
+            const zip = new JSZip();
+            
+            if(existingContent.trim()){
+                zip.file("00_Contatos_Existentes.vcf", "\uFEFF" + existingContent.trim());
+            }
+
+            for (const groupName in newVCardsByGroup) {
+                const vcardsInGroup = newVCardsByGroup[groupName];
+                // Não há necessidade de fragmentar mais se a lógica principal já agrupa
+                const vcfChunkContent = vcardsInGroup.join('\r\n');
+                zip.file(`Novos_${groupName}.vcf`, "\uFEFF" + vcfChunkContent);
+            }
+
+            zip.generateAsync({type:"blob"}).then(function(content) {
+                const link = document.createElement("a");
+                const url = URL.createObjectURL(content);
+                link.setAttribute("href", url);
+                link.setAttribute("download", "contatos_por_grupo.zip");
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            });
+        });
+
+    </script>
+</body>
+</html>
